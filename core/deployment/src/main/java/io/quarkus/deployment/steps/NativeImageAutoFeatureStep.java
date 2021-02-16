@@ -332,16 +332,18 @@ public class NativeImageAutoFeatureStep {
             if (entry.getValue().fields) {
                 tc.invokeStaticMethod(
                         ofMethod(RUNTIME_REFLECTION, "register", void.class,
-                                boolean.class, Field[].class),
-                        tc.load(entry.getValue().finalFieldsWritable), fields);
+                                boolean.class, boolean.class, Field[].class),
+                        tc.load(entry.getValue().finalFieldsWritable), mv.load(true), fields);
             } else if (!entry.getValue().fieldSet.isEmpty()) {
                 ResultHandle farray = tc.newArray(Field.class, tc.load(1));
                 for (String field : entry.getValue().fieldSet) {
                     ResultHandle fhandle = tc.invokeVirtualMethod(
                             ofMethod(Class.class, "getDeclaredField", Field.class, String.class), clazz, tc.load(field));
                     tc.writeArrayValue(farray, 0, fhandle);
+                    System.out.println("---------- registering: " + clazz.toString());
                     tc.invokeStaticMethod(
-                            ofMethod(RUNTIME_REFLECTION, "register", void.class, Field[].class),
+                            ofMethod(RUNTIME_REFLECTION, "register", void.class, boolean.class, boolean.class,
+                                    mv.load(true), mv.load(true), Field[].class),
                             farray);
                 }
             }
