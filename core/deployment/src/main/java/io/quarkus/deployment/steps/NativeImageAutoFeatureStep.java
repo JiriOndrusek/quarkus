@@ -83,6 +83,10 @@ public class NativeImageAutoFeatureStep {
             List<ServiceProviderBuildItem> serviceProviderBuildItems,
             List<UnsafeAccessedFieldBuildItem> unsafeAccessedFields,
             List<JniRuntimeAccessBuildItem> jniRuntimeAccessibleClasses) {
+        System.out.println("************************************************************************");
+        System.out.println("**************** NativeImageAutoFeatureStep ****************************");
+        System.out.println("************************************************************************");
+
         ClassCreator file = new ClassCreator(new ClassOutput() {
             @Override
             public void write(String s, byte[] bytes) {
@@ -243,7 +247,7 @@ public class NativeImageAutoFeatureStep {
         final Map<String, ReflectionInfo> reflectiveClasses = new LinkedHashMap<>();
         for (ReflectiveClassBuildItem i : reflectiveClassBuildItems) {
             addReflectiveClass(reflectiveClasses, i.isConstructors(), i.isMethods(), i.isFields(), i.areFinalFieldsWritable(),
-                    i.isWeak(),
+                    i.isWeak(), i.isSerialization(),
                     i.getClassNames().toArray(new String[0]));
         }
         for (ReflectiveFieldBuildItem i : reflectiveFields) {
@@ -254,12 +258,12 @@ public class NativeImageAutoFeatureStep {
         }
 
         for (ServiceProviderBuildItem i : serviceProviderBuildItems) {
-            addReflectiveClass(reflectiveClasses, true, false, false, false, false,
+            addReflectiveClass(reflectiveClasses, true, false, false, false, false, false,
                     i.providers().toArray(new String[] {}));
         }
 
         for (Map.Entry<String, ReflectionInfo> entry : reflectiveClasses.entrySet()) {
-
+            //            System.out.println("*** " + entry.getKey());
             MethodCreator mv = file.getMethodCreator("registerClass" + count++, "V");
             mv.setModifiers(Modifier.PRIVATE | Modifier.STATIC);
             overallCatch.invokeStaticMethod(mv.getMethodDescriptor());
@@ -279,6 +283,37 @@ public class NativeImageAutoFeatureStep {
                     .invokeVirtualMethod(ofMethod(Class.class, "getDeclaredConstructors", Constructor[].class), clazz);
             ResultHandle methods = tc.invokeVirtualMethod(ofMethod(Class.class, "getDeclaredMethods", Method[].class), clazz);
             ResultHandle fields = tc.invokeVirtualMethod(ofMethod(Class.class, "getDeclaredFields", Field[].class), clazz);
+
+            ResultHandle objectClass = tc.invokeStaticMethod(
+                    ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+                    tc.load("java.lang.Object"), tc.load(false), tccl);
+            ResultHandle objectStreamClass = tc.invokeStaticMethod(
+                    ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+                    tc.load("java.io.ObjectStreamClass"), tc.load(false), tccl);
+
+            if (entry.getValue().serialization) {
+                //todo it has to be gained
+                //reflectionFactory = getReflectionFactoryMethod.invoke(null);
+                //newConstructorForSerializationMethod = ReflectionUtil.lookupMethod(reflectionFactoryClass, " ", Class.class);
+                //return (Constructor<?>) newConstructorForSerializationMethod.invoke(reflectionFactory, serializationTargetClass);
+                ResultHandle objectConstructor = tc.invokeVirtualMethod(
+                        ofMethod(Class.class, "getDeclaredConstructors", Constructor[].class), objectClass);
+                tc.invokeStaticMethod(
+                        ofMethod(RUNTIME_REFLECTION, "register", void.class, Executable[].class),
+                        objectConstructor);
+
+                ResultHandle farray = tc.newArray(Method.class, tc.load(1));
+                ResultHandle paramArray = tc.newArray(Class.class, tc.load(0));
+                ResultHandle fhandle = tc.invokeVirtualMethod(
+                        ofMethod(Class.class, "getDeclaredMethod", Method.class, String.class, Class[].class),
+                        objectStreamClass,
+                        tc.load("computeDefaultSUID"), paramArray);
+                tc.writeArrayValue(farray, 0, fhandle);
+                tc.invokeStaticMethod(
+                        ofMethod(RUNTIME_REFLECTION, "register", void.class, Executable[].class),
+                        farray);
+
+            }
 
             if (!entry.getValue().weak) {
                 ResultHandle carray = tc.newArray(Class.class, tc.load(1));
@@ -332,8 +367,8 @@ public class NativeImageAutoFeatureStep {
             if (entry.getValue().fields) {
                 tc.invokeStaticMethod(
                         ofMethod(RUNTIME_REFLECTION, "register", void.class,
-                                boolean.class, Field[].class),
-                        tc.load(entry.getValue().finalFieldsWritable), fields);
+                                boolean.class, boolean.class, Field[].class),
+                        tc.load(entry.getValue().finalFieldsWritable), tc.load(entry.getValue().serialization), fields);
             } else if (!entry.getValue().fieldSet.isEmpty()) {
                 ResultHandle farray = tc.newArray(Field.class, tc.load(1));
                 for (String field : entry.getValue().fieldSet) {
@@ -418,7 +453,8 @@ public class NativeImageAutoFeatureStep {
         String cl = methodInfo.getDeclaringClass();
         ReflectionInfo existing = reflectiveClasses.get(cl);
         if (existing == null) {
-            reflectiveClasses.put(cl, existing = new ReflectionInfo(false, false, false, false, false));
+            reflectiveClasses.put(cl, existing = new ReflectionInfo(false, false, false, false, false,
+                    cl.equals("io.quarkus.it.corestuff.SomeSerializationObject")));
         }
         if (methodInfo.getName().equals("<init>")) {
             existing.ctorSet.add(methodInfo);
@@ -428,12 +464,13 @@ public class NativeImageAutoFeatureStep {
     }
 
     public void addReflectiveClass(Map<String, ReflectionInfo> reflectiveClasses, boolean constructors, boolean method,
-            boolean fields, boolean finalFieldsWritable, boolean weak,
+            boolean fields, boolean finalFieldsWritable, boolean weak, boolean serialization,
             String... className) {
         for (String cl : className) {
             ReflectionInfo existing = reflectiveClasses.get(cl);
             if (existing == null) {
-                reflectiveClasses.put(cl, new ReflectionInfo(constructors, method, fields, finalFieldsWritable, weak));
+                reflectiveClasses.put(cl,
+                        new ReflectionInfo(constructors, method, fields, finalFieldsWritable, weak, serialization));
             } else {
                 if (constructors) {
                     existing.constructors = true;
@@ -452,7 +489,8 @@ public class NativeImageAutoFeatureStep {
         String cl = fieldInfo.getDeclaringClass();
         ReflectionInfo existing = reflectiveClasses.get(cl);
         if (existing == null) {
-            reflectiveClasses.put(cl, existing = new ReflectionInfo(false, false, false, false, false));
+            reflectiveClasses.put(cl, existing = new ReflectionInfo(false, false, false, false, false,
+                    cl.equals("io.quarkus.it.corestuff.SomeSerializationObject")));
         }
         existing.fieldSet.add(fieldInfo.getName());
     }
@@ -463,17 +501,26 @@ public class NativeImageAutoFeatureStep {
         boolean fields;
         boolean finalFieldsWritable;
         boolean weak;
+        boolean serialization;
         Set<String> fieldSet = new HashSet<>();
         Set<ReflectiveMethodBuildItem> methodSet = new HashSet<>();
         Set<ReflectiveMethodBuildItem> ctorSet = new HashSet<>();
 
         private ReflectionInfo(boolean constructors, boolean methods, boolean fields, boolean finalFieldsWritable,
-                boolean weak) {
+                boolean weak, boolean serialization) {
             this.methods = methods;
             this.fields = fields;
             this.constructors = constructors;
             this.finalFieldsWritable = finalFieldsWritable;
             this.weak = weak;
+            this.serialization = serialization;
         }
+    }
+
+    public static void main(String[] args) {
+        Class objectClass = Object.class;
+        Constructor[] c = objectClass.getDeclaredConstructors();
+        System.out.println(c);
+
     }
 }
