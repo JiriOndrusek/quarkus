@@ -36,6 +36,8 @@ public class SerializationTestEndpoint extends HttpServlet {
             SomeSerializationObject result = (SomeSerializationObject) is.readObject();
             if (!instance.getName().equals(result.getName())) {
                 reportException("Serialized output differs from input", null, resp);
+            } else {
+                resp.getWriter().write("OK");
             }
         } catch (Exception e) {
             reportException(e, resp);

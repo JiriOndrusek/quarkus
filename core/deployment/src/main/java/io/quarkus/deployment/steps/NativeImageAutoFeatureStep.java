@@ -298,16 +298,19 @@ public class NativeImageAutoFeatureStep {
                 //return (Constructor<?>) newConstructorForSerializationMethod.invoke(reflectionFactory, serializationTargetClass);
                 ResultHandle objectConstructor = tc.invokeVirtualMethod(
                         ofMethod(Class.class, "getDeclaredConstructors", Constructor[].class), objectClass);
+
                 tc.invokeStaticMethod(
                         ofMethod(RUNTIME_REFLECTION, "register", void.class, Executable[].class),
                         objectConstructor);
 
                 ResultHandle farray = tc.newArray(Method.class, tc.load(1));
-                ResultHandle paramArray = tc.newArray(Class.class, tc.load(0));
+                ResultHandle paramArray = tc.newArray(Class.class, tc.load(1));
+                tc.writeArrayValue(paramArray, 0, tc.loadClass("java.lang.Class"));
                 ResultHandle fhandle = tc.invokeVirtualMethod(
                         ofMethod(Class.class, "getDeclaredMethod", Method.class, String.class, Class[].class),
                         objectStreamClass,
-                        tc.load("computeDefaultSUID"), paramArray);
+                        tc.load("computeDefaultSUID"),
+                        paramArray);
                 tc.writeArrayValue(farray, 0, fhandle);
                 tc.invokeStaticMethod(
                         ofMethod(RUNTIME_REFLECTION, "register", void.class, Executable[].class),
@@ -381,7 +384,7 @@ public class NativeImageAutoFeatureStep {
                 }
             }
             CatchBlockCreator cc = tc.addCatch(Throwable.class);
-            //cc.invokeVirtualMethod(ofMethod(Throwable.class, "printStackTrace", void.class), cc.getCaughtException());
+            cc.invokeVirtualMethod(ofMethod(Throwable.class, "printStackTrace", void.class), cc.getCaughtException());
             mv.returnValue(null);
         }
 
@@ -517,10 +520,16 @@ public class NativeImageAutoFeatureStep {
         }
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         Class objectClass = Object.class;
         Constructor[] c = objectClass.getDeclaredConstructors();
         System.out.println(c);
 
+        try {
+            Method m = java.io.ObjectStreamClass.class.getDeclaredMethod("computeDefaultSUID", new Class[] { Class.class });
+            System.out.println(m);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
     }
 }
