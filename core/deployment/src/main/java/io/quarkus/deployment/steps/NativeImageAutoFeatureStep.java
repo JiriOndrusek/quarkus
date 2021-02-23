@@ -103,11 +103,11 @@ public class NativeImageAutoFeatureStep {
         //serialization class
         ResultHandle serializationFeatureClass = requiredCatch
                 .loadClass("com.oracle.svm.reflect.serialize.hosted.SerializationFeature");
-        ResultHandle requiredFeatruresList = requiredCatch.invokeStaticMethod(
+        ResultHandle requiredFeaturesList = requiredCatch.invokeStaticMethod(
                 ofMethod("java.util.Collections", "singletonList", List.class, Object.class),
                 serializationFeatureClass);
 
-        requiredCatch.returnValue(requiredFeatruresList);
+        requiredCatch.returnValue(requiredFeaturesList);
 
         //MethodCreator afterReg = file.getMethodCreator("afterRegistration", void.class, "org.graalvm.nativeimage.Feature$AfterRegistrationAccess");
         MethodCreator beforeAn = file.getMethodCreator("beforeAnalysis", "V", BEFORE_ANALYSIS_ACCESS);
@@ -320,6 +320,10 @@ public class NativeImageAutoFeatureStep {
                         IMAGE_SINGLETONS_LOOKUP,
                         tc.loadClass("com.oracle.svm.core.jdk.serialize.SerializationRegistry"));
 
+                ResultHandle serializationFeature = tc.invokeStaticMethod(
+                        IMAGE_SINGLETONS_LOOKUP,
+                        tc.loadClass("com.oracle.svm.reflect.serialize.hosted.SerializationFeature"));
+
                 ResultHandle reflectionFactory = tc.invokeStaticMethod(
                         ofMethod("sun.reflect.ReflectionFactory", "getReflectionFactory", "sun.reflect.ReflectionFactory"));
 
@@ -342,12 +346,21 @@ public class NativeImageAutoFeatureStep {
 
                 /// 22222222222222222222222222222222222222222222222222
                 ResultHandle paramArray1 = tc.newArray(Class.class, tc.load(0));
-                ResultHandle newSerializationConstructorAccessor = tc.invokeVirtualMethod(
-                        ofMethod(Class.class, "getDeclaredMethod", Method.class, String.class, Class[].class),
-                        tc.loadClass(Constructor.class),
-                        tc.load("getConstructorAccessor"),
-                        paramArray1);
+                //                ResultHandle newSerializationConstructorAccessor = tc.invokeVirtualMethod(
+                //                        ofMethod(Class.class, "getDeclaredMethod", Method.class, String.class, Class[].class),
+                //                        tc.loadClass(Constructor.class),
+                //                        tc.load("getConstructorAccessor"),
+                //                        paramArray1);
                 /// 22222222222222222222222222222222222222222222222222
+                ResultHandle paramArray3 = tc.newArray(Object.class, tc.load(0));
+                ResultHandle getConstructorAccessorMethod = tc.invokeStaticMethod(
+                        ofMethod("com.oracle.svm.util.ReflectionUtil", "lookupMethod", Method.class, Class.class, String.class,
+                                Class[].class),
+                        tc.loadClass(Constructor.class), tc.load("getConstructorAccessor"), paramArray1);
+
+                //                tc.invokeVirtualMethod(
+                //                        ofMethod("com.oracle.svm.util.ReflectionUtil", "getDeclaringClass", Class.class),
+                //                        newSerializationConstructor);
 
                 //targetConstructor.getDeclaringClass();
                 //                ResultHandle newSerializationConstructorClass = tc.invokeVirtualMethod(
@@ -360,11 +373,14 @@ public class NativeImageAutoFeatureStep {
                 tc.invokeVirtualMethod(
                         ofMethod("com.oracle.svm.reflect.serialize.SerializationSupport", "addConstructorAccessor",
                                 Object.class, Class.class, Class.class, Object.class),
-                        serializationSupport, clazz, newSerializationConstructorClass, newSerializationConstructorAccessor);
+                        serializationSupport, clazz, newSerializationConstructorClass, getConstructorAccessorMethod);
                 tc.invokeStaticMethod(
                         ofMethod("com.oracle.svm.reflect.serialize.hosted.SerializationFeature", "addReflections", void.class,
                                 Class.class, Class.class),
                         clazz, objectClass);
+
+                //                ResultHandle serializationBuilder = tc.invokeVirtualMethod(
+                //                        ofMethod(Class.class, "getDeclaredField", Field.class, String.class), clazz, tc.load(field));
                 //******************************************************
 
                 //                ResultHandle paramArray3 = tc.newArray(Class.class, tc.load(0));
@@ -602,37 +618,41 @@ public class NativeImageAutoFeatureStep {
         }
     }
 
-    public static void main(String[] args) throws Exception {
-        Class objectClass = Object.class;
-        Constructor c = objectClass.getDeclaredConstructor();
-        System.out.println(c);
-        Method m2 = Constructor.class.getDeclaredMethod("getConstructorAccessor");
-        //        ReflectionFactory
-
-        //newSerializationConstructor
-        Constructor newSerializationConstructor = objectClass.getDeclaredConstructor();
-        //newSerializationConstructorClass
-        Class newSerializationConstructorClass = newSerializationConstructor.getDeclaringClass();
-        //newSerializationConstructorAccessor
-        //        Method newSerializationConstructorAccessor = newSerializationConstructorClass.getDeclaredMethod("getConstructorAccessor", Class[].class);
-        Method newSerializationConstructorAccessor = lookupMethod(Constructor.class, "getConstructorAccessor");
-        try {
-            Method m = java.io.ObjectStreamClass.class.getDeclaredMethod("computeDefaultSUID", new Class[] { Class.class });
-            System.out.println(m);
-        } catch (Throwable t) {
-
-            t.printStackTrace();
-        }
-    }
-
-    public static Method lookupMethod(Class<?> declaringClass, String methodName, Class<?>... parameterTypes) {
-        try {
-            Method result = declaringClass.getDeclaredMethod(methodName, parameterTypes);
-            //            openModule(declaringClass);
-            //            result.setAccessible(true);
-            return result;
-        } catch (ReflectiveOperationException ex) {
-            throw new RuntimeException(ex);
-        }
-    }
+    //    public static void main(String[] args) throws Exception {
+    //        Class objectClass = Object.class;
+    //        Constructor c = objectClass.getDeclaredConstructor();
+    //        System.out.println(c);
+    //        Method m2 = Constructor.class.getDeclaredMethod("getConstructorAccessor");
+    //        //        ReflectionFactory
+    //
+    //        //newSerializationConstructor
+    //        Constructor newSerializationConstructor = objectClass.getDeclaredConstructor();
+    //        //newSerializationConstructorClass
+    //        Class newSerializationConstructorClass = newSerializationConstructor.getDeclaringClass();
+    //        NativeImageAutoFeatureStep step = new NativeImageAutoFeatureStep();
+    //
+    //        //newSerializationConstructorAccessor
+    //        //        Method newSerializationConstructorAccessor = newSerializationConstructorClass.getDeclaredMethod("getConstructorAccessor", Class[].class);
+    //        Method newSerializationConstructorAccessor = lookupMethod(Constructor.class, "getConstructorAccessor");
+    //        try {
+    //            Method m = java.io.ObjectStreamClass.class.getDeclaredMethod("computeDefaultSUID", new Class[] { Class.class });
+    //            System.out.println(m);
+    //        } catch (Throwable t) {
+    //
+    //            t.printStackTrace();
+    //        }
+    //    }
+    //
+    //    private String testField = "hello";
+    //
+    //    public static Method lookupMethod(Class<?> declaringClass, String methodName, Class<?>... parameterTypes) {
+    //        try {
+    //            Method result = declaringClass.getDeclaredMethod(methodName, parameterTypes);
+    //            //            openModule(declaringClass);
+    //            //            result.setAccessible(true);
+    //            return result;
+    //        } catch (ReflectiveOperationException ex) {
+    //            throw new RuntimeException(ex);
+    //        }
+    //    }
 }
