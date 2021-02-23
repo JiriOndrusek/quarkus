@@ -287,36 +287,12 @@ public class NativeImageAutoFeatureStep {
             ResultHandle objectClass = tc.invokeStaticMethod(
                     ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
                     tc.load("java.lang.Object"), tc.load(false), tccl);
+            ResultHandle reflectClass = tc.invokeStaticMethod(
+                    ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+                    tc.load("sun.reflect.ReflectionFactory"), tc.load(false), tccl);
             ResultHandle objectStreamClass = tc.invokeStaticMethod(
                     ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
                     tc.load("java.io.ObjectStreamClass"), tc.load(false), tccl);
-
-            if (entry.getValue().serialization) {
-                //todo it has to be gained
-                //reflectionFactory = getReflectionFactoryMethod.invoke(null);
-                //newConstructorForSerializationMethod = ReflectionUtil.lookupMethod(reflectionFactoryClass, " ", Class.class);
-                //return (Constructor<?>) newConstructorForSerializationMethod.invoke(reflectionFactory, serializationTargetClass);
-                ResultHandle objectConstructor = tc.invokeVirtualMethod(
-                        ofMethod(Class.class, "getDeclaredConstructors", Constructor[].class), objectClass);
-
-                tc.invokeStaticMethod(
-                        ofMethod(RUNTIME_REFLECTION, "register", void.class, Executable[].class),
-                        objectConstructor);
-
-                ResultHandle farray = tc.newArray(Method.class, tc.load(1));
-                ResultHandle paramArray = tc.newArray(Class.class, tc.load(1));
-                tc.writeArrayValue(paramArray, 0, tc.loadClass("java.lang.Class"));
-                ResultHandle fhandle = tc.invokeVirtualMethod(
-                        ofMethod(Class.class, "getDeclaredMethod", Method.class, String.class, Class[].class),
-                        objectStreamClass,
-                        tc.load("computeDefaultSUID"),
-                        paramArray);
-                tc.writeArrayValue(farray, 0, fhandle);
-                tc.invokeStaticMethod(
-                        ofMethod(RUNTIME_REFLECTION, "register", void.class, Executable[].class),
-                        farray);
-
-            }
 
             if (!entry.getValue().weak) {
                 ResultHandle carray = tc.newArray(Class.class, tc.load(1));
@@ -383,6 +359,61 @@ public class NativeImageAutoFeatureStep {
                             farray);
                 }
             }
+            if (entry.getValue().serialization) {
+
+                ResultHandle reflectionFactory = tc.invokeStaticMethod(
+                        ofMethod("sun.reflect.ReflectionFactory", "getReflectionFactory", "sun.reflect.ReflectionFactory"));
+
+                ResultHandle newSerializationConstructor = tc.invokeVirtualMethod(
+                        ofMethod("sun.reflect.ReflectionFactory", "newConstructorForSerialization", Constructor.class,
+                                Class.class),
+                        reflectionFactory, clazz);
+
+                //targetConstructor.getDeclaringClass();
+                ResultHandle newSerializationConstructorClass = tc.invokeVirtualMethod(
+                        ofMethod("java.lang.reflect.Constructor", "getDeclaringClass", Class.class,
+                                Class.class),
+                        newSerializationConstructor);
+
+//                ResultHandle paramArray3 = tc.newArray(Class.class, tc.load(0));
+//                ResultHandle newSerializationConstructor = tc.invokeVirtualMethod(
+//                        ofMethod(Class.class, "getDeclaredConstructor", Constructor.class, Class[].class),
+//                        newSerializationConstructorClass, paramArray3);
+//
+//                ResultHandle paramArray2 = tc.newArray(Executable.class, tc.load(1));
+//                tc.writeArrayValue(paramArray2, 0, newSerializationConstructor);
+//                tc.invokeStaticMethod(
+//                        ofMethod(RUNTIME_REFLECTION, "register", void.class, Executable[].class),
+//                        paramArray2);
+
+                //todo it has to be gained
+                //reflectionFactory = getReflectionFactoryMethod.invoke(null);
+                //newConstructorForSerializationMethod = ReflectionUtil.lookupMethod(reflectionFactoryClass, " ", Class.class);
+                //return (Constructor<?>) newConstructorForSerializationMethod.invoke(reflectionFactory, serializationTargetClass);
+                //                ResultHandle objectConstructor = tc.invokeVirtualMethod(
+                //                        ofMethod(Class.class, "getDeclaredConstructors", Constructor[].class), objectClass);
+                //
+                //                tc.invokeStaticMethod(
+                //                        ofMethod(RUNTIME_REFLECTION, "register", void.class, Executable[].class),
+                //                        objectConstructor);
+
+                ResultHandle farray = tc.newArray(Method.class, tc.load(1));
+                //                ResultHandle paramArray = tc.newArray(Class.class, tc.load(1));
+                //                tc.writeArrayValue(paramArray, 0, tc.loadClass("java.lang.Class"));
+                ResultHandle paramArray = tc.newArray(Class.class, tc.load(1));
+                tc.writeArrayValue(paramArray, 0, tc.loadClass("java.lang.Class"));
+                ResultHandle fhandle = tc.invokeVirtualMethod(
+                        ofMethod(Class.class, "getDeclaredMethod", Method.class, String.class, Class[].class),
+                        objectStreamClass,
+                        tc.load("computeDefaultSUID"),
+                        paramArray);
+                tc.writeArrayValue(farray, 0, fhandle);
+                tc.invokeStaticMethod(
+                        ofMethod(RUNTIME_REFLECTION, "register", void.class, Executable[].class),
+                        farray);
+
+            }
+
             CatchBlockCreator cc = tc.addCatch(Throwable.class);
             cc.invokeVirtualMethod(ofMethod(Throwable.class, "printStackTrace", void.class), cc.getCaughtException());
             mv.returnValue(null);
@@ -522,7 +553,7 @@ public class NativeImageAutoFeatureStep {
 
     public static void main(String[] args) throws Exception {
         Class objectClass = Object.class;
-        Constructor[] c = objectClass.getDeclaredConstructors();
+        Constructor c = objectClass.getDeclaredConstructor();
         System.out.println(c);
 
         try {
