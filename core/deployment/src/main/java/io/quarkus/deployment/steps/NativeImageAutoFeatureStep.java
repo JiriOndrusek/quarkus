@@ -243,7 +243,7 @@ public class NativeImageAutoFeatureStep {
         final Map<String, ReflectionInfo> reflectiveClasses = new LinkedHashMap<>();
         for (ReflectiveClassBuildItem i : reflectiveClassBuildItems) {
             addReflectiveClass(reflectiveClasses, i.isConstructors(), i.isMethods(), i.isFields(), i.areFinalFieldsWritable(),
-                    i.isWeak(),
+                    i.isWeak(), i.isSerialization(),
                     i.getClassNames().toArray(new String[0]));
         }
         for (ReflectiveFieldBuildItem i : reflectiveFields) {
@@ -254,12 +254,15 @@ public class NativeImageAutoFeatureStep {
         }
 
         for (ServiceProviderBuildItem i : serviceProviderBuildItems) {
-            addReflectiveClass(reflectiveClasses, true, false, false, false, false,
+            addReflectiveClass(reflectiveClasses, true, false, false, false, false, false,
                     i.providers().toArray(new String[] {}));
         }
 
-        for (Map.Entry<String, ReflectionInfo> entry : reflectiveClasses.entrySet()) {
+        ResultHandle serializationSupport = null;
+        ResultHandle reflectionFactory = null;
 
+        for (Map.Entry<String, ReflectionInfo> entry : reflectiveClasses.entrySet()) {
+            //            System.out.println("*** " + entry.getKey());
             MethodCreator mv = file.getMethodCreator("registerClass" + count++, "V");
             mv.setModifiers(Modifier.PRIVATE | Modifier.STATIC);
             overallCatch.invokeStaticMethod(mv.getMethodDescriptor());
@@ -279,6 +282,16 @@ public class NativeImageAutoFeatureStep {
                     .invokeVirtualMethod(ofMethod(Class.class, "getDeclaredConstructors", Constructor[].class), clazz);
             ResultHandle methods = tc.invokeVirtualMethod(ofMethod(Class.class, "getDeclaredMethods", Method[].class), clazz);
             ResultHandle fields = tc.invokeVirtualMethod(ofMethod(Class.class, "getDeclaredFields", Field[].class), clazz);
+
+            ResultHandle objectClass = tc.invokeStaticMethod(
+                    ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+                    tc.load("java.lang.Object"), tc.load(false), tccl);
+            ResultHandle reflectClass = tc.invokeStaticMethod(
+                    ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+                    tc.load("sun.reflect.ReflectionFactory"), tc.load(false), tccl);
+            ResultHandle objectStreamClass = tc.invokeStaticMethod(
+                    ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+                    tc.load("java.io.ObjectStreamClass"), tc.load(false), tccl);
 
             if (!entry.getValue().weak) {
                 ResultHandle carray = tc.newArray(Class.class, tc.load(1));
@@ -332,8 +345,8 @@ public class NativeImageAutoFeatureStep {
             if (entry.getValue().fields) {
                 tc.invokeStaticMethod(
                         ofMethod(RUNTIME_REFLECTION, "register", void.class,
-                                boolean.class, Field[].class),
-                        tc.load(entry.getValue().finalFieldsWritable), fields);
+                                boolean.class, boolean.class, Field[].class),
+                        tc.load(entry.getValue().finalFieldsWritable), tc.load(entry.getValue().serialization), fields);
             } else if (!entry.getValue().fieldSet.isEmpty()) {
                 ResultHandle farray = tc.newArray(Field.class, tc.load(1));
                 for (String field : entry.getValue().fieldSet) {
@@ -345,6 +358,61 @@ public class NativeImageAutoFeatureStep {
                             farray);
                 }
             }
+
+            if (entry.getValue().serialization) {
+                //any serialization requires serializationFeature for registering constructor accessors
+                if (serializationSupport == null) {
+
+                    MethodCreator requiredFeatures = file.getMethodCreator("getRequiredFeatures", "java.util.List");
+                    TryBlock requiredCatch = requiredFeatures.tryBlock();
+
+                    //serialization class
+                    ResultHandle serializationFeatureClass = requiredCatch
+                            .loadClass("com.oracle.svm.reflect.serialize.hosted.SerializationFeature");
+                    ResultHandle requiredFeaturesList = requiredCatch.invokeStaticMethod(
+                            ofMethod("java.util.Collections", "singletonList", List.class, Object.class),
+                            serializationFeatureClass);
+
+                    requiredCatch.returnValue(requiredFeaturesList);
+
+                    serializationSupport = tc.invokeStaticMethod(
+                            IMAGE_SINGLETONS_LOOKUP,
+                            tc.loadClass("com.oracle.svm.core.jdk.serialize.SerializationRegistry"));
+
+                    reflectionFactory = tc.invokeStaticMethod(
+                            ofMethod("sun.reflect.ReflectionFactory", "getReflectionFactory", "sun.reflect.ReflectionFactory"));
+                }
+
+                ResultHandle newSerializationConstructor = tc.invokeVirtualMethod(
+                        ofMethod("sun.reflect.ReflectionFactory", "newConstructorForSerialization", Constructor.class,
+                                Class.class),
+                        reflectionFactory, clazz);
+
+                ResultHandle newSerializationConstructorClass = tc.invokeVirtualMethod(
+                        ofMethod(Constructor.class, "getDeclaringClass", Class.class),
+                        newSerializationConstructor);
+
+                ResultHandle lookuMethod = tc.invokeStaticMethod(
+                        ofMethod("com.oracle.svm.util.ReflectionUtil", "lookupMethod", Method.class, Class.class, String.class,
+                                Class[].class),
+                        tc.loadClass(Constructor.class), tc.load("getConstructorAccessor"),
+                        tc.newArray(Class.class, tc.load(0)));
+
+                ResultHandle accessor = tc.invokeVirtualMethod(
+                        ofMethod(Method.class, "invoke", Object.class, Object.class,
+                                Object[].class),
+                        lookuMethod, newSerializationConstructor, tc.newArray(Object.class, tc.load(0)));
+
+                tc.invokeVirtualMethod(
+                        ofMethod("com.oracle.svm.reflect.serialize.SerializationSupport", "addConstructorAccessor",
+                                Object.class, Class.class, Class.class, Object.class),
+                        serializationSupport, clazz, newSerializationConstructorClass, accessor);
+                tc.invokeStaticMethod(
+                        ofMethod("com.oracle.svm.reflect.serialize.hosted.SerializationFeature", "addReflections", void.class,
+                                Class.class, Class.class),
+                        clazz, objectClass);
+            }
+
             CatchBlockCreator cc = tc.addCatch(Throwable.class);
             //cc.invokeVirtualMethod(ofMethod(Throwable.class, "printStackTrace", void.class), cc.getCaughtException());
             mv.returnValue(null);
@@ -418,7 +486,8 @@ public class NativeImageAutoFeatureStep {
         String cl = methodInfo.getDeclaringClass();
         ReflectionInfo existing = reflectiveClasses.get(cl);
         if (existing == null) {
-            reflectiveClasses.put(cl, existing = new ReflectionInfo(false, false, false, false, false));
+            reflectiveClasses.put(cl, existing = new ReflectionInfo(false, false, false, false, false,
+                    cl.equals("io.quarkus.it.corestuff.SomeSerializationObject")));
         }
         if (methodInfo.getName().equals("<init>")) {
             existing.ctorSet.add(methodInfo);
@@ -428,12 +497,13 @@ public class NativeImageAutoFeatureStep {
     }
 
     public void addReflectiveClass(Map<String, ReflectionInfo> reflectiveClasses, boolean constructors, boolean method,
-            boolean fields, boolean finalFieldsWritable, boolean weak,
+            boolean fields, boolean finalFieldsWritable, boolean weak, boolean serialization,
             String... className) {
         for (String cl : className) {
             ReflectionInfo existing = reflectiveClasses.get(cl);
             if (existing == null) {
-                reflectiveClasses.put(cl, new ReflectionInfo(constructors, method, fields, finalFieldsWritable, weak));
+                reflectiveClasses.put(cl,
+                        new ReflectionInfo(constructors, method, fields, finalFieldsWritable, weak, serialization));
             } else {
                 if (constructors) {
                     existing.constructors = true;
@@ -452,7 +522,8 @@ public class NativeImageAutoFeatureStep {
         String cl = fieldInfo.getDeclaringClass();
         ReflectionInfo existing = reflectiveClasses.get(cl);
         if (existing == null) {
-            reflectiveClasses.put(cl, existing = new ReflectionInfo(false, false, false, false, false));
+            reflectiveClasses.put(cl, existing = new ReflectionInfo(false, false, false, false, false,
+                    cl.equals("io.quarkus.it.corestuff.SomeSerializationObject")));
         }
         existing.fieldSet.add(fieldInfo.getName());
     }
@@ -463,17 +534,19 @@ public class NativeImageAutoFeatureStep {
         boolean fields;
         boolean finalFieldsWritable;
         boolean weak;
+        boolean serialization;
         Set<String> fieldSet = new HashSet<>();
         Set<ReflectiveMethodBuildItem> methodSet = new HashSet<>();
         Set<ReflectiveMethodBuildItem> ctorSet = new HashSet<>();
 
         private ReflectionInfo(boolean constructors, boolean methods, boolean fields, boolean finalFieldsWritable,
-                boolean weak) {
+                boolean weak, boolean serialization) {
             this.methods = methods;
             this.fields = fields;
             this.constructors = constructors;
             this.finalFieldsWritable = finalFieldsWritable;
             this.weak = weak;
+            this.serialization = serialization;
         }
     }
 }
