@@ -31,7 +31,7 @@ public class SerializationTestEndpoint extends HttpServlet {
         try {
             SomeSerializationObject instance = new SomeSerializationObject();
             instance.setPerson(new Person("Sheldon"));
-            instance.setExternalizablePerson(new ExternalizablePerson("Sheldon 2.0"));
+            instance.setExternalizablePerson(ExternalizablePerson.create("Sheldon 2.0"));
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             ObjectOutputStream os = new ObjectOutputStream(out);
             os.writeObject(instance);

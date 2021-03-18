@@ -12,10 +12,11 @@ public class ExternalizablePerson implements Externalizable {
 
     private String name;
 
-    public ExternalizablePerson() {
+    public static ExternalizablePerson create(String name) {
+        return new ExternalizablePerson(name);
     }
 
-    public ExternalizablePerson(String name) {
+    private ExternalizablePerson(String name) {
         setName(name);
     }
 

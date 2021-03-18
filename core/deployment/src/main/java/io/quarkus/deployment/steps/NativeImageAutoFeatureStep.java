@@ -261,11 +261,9 @@ public class NativeImageAutoFeatureStep {
                     i.providers().toArray(new String[] {}));
         }
 
-        ResultHandle serializationSupport = null;
-        ResultHandle reflectionFactory = null;
+        MethodDescriptor registerSerializationMethod = null;
 
         for (Map.Entry<String, ReflectionInfo> entry : reflectiveClasses.entrySet()) {
-            //            System.out.println("*** " + entry.getKey());
             MethodCreator mv = file.getMethodCreator("registerClass" + count++, "V");
             mv.setModifiers(Modifier.PRIVATE | Modifier.STATIC);
             overallCatch.invokeStaticMethod(mv.getMethodDescriptor());
@@ -285,16 +283,6 @@ public class NativeImageAutoFeatureStep {
                     .invokeVirtualMethod(ofMethod(Class.class, "getDeclaredConstructors", Constructor[].class), clazz);
             ResultHandle methods = tc.invokeVirtualMethod(ofMethod(Class.class, "getDeclaredMethods", Method[].class), clazz);
             ResultHandle fields = tc.invokeVirtualMethod(ofMethod(Class.class, "getDeclaredFields", Field[].class), clazz);
-
-            ResultHandle objectClass = tc.invokeStaticMethod(
-                    ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
-                    tc.load("java.lang.Object"), tc.load(false), tccl);
-            ResultHandle reflectClass = tc.invokeStaticMethod(
-                    ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
-                    tc.load("sun.reflect.ReflectionFactory"), tc.load(false), tccl);
-            ResultHandle objectStreamClass = tc.invokeStaticMethod(
-                    ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
-                    tc.load("java.io.ObjectStreamClass"), tc.load(false), tccl);
 
             if (!entry.getValue().weak) {
                 ResultHandle carray = tc.newArray(Class.class, tc.load(1));
@@ -363,74 +351,11 @@ public class NativeImageAutoFeatureStep {
             }
 
             if (entry.getValue().serialization) {
-                //any serialization requires serializationFeature to register constructor accessors
-                if (serializationSupport == null) {
-
-                    MethodCreator requiredFeatures = file.getMethodCreator("getRequiredFeatures", "java.util.List");
-                    TryBlock requiredCatch = requiredFeatures.tryBlock();
-
-                    //serialization class
-                    ResultHandle serializationFeatureClass = requiredCatch
-                            .loadClass("com.oracle.svm.reflect.serialize.hosted.SerializationFeature");
-                    ResultHandle requiredFeaturesList = requiredCatch.invokeStaticMethod(
-                            ofMethod("java.util.Collections", "singletonList", List.class, Object.class),
-                            serializationFeatureClass);
-
-                    requiredCatch.returnValue(requiredFeaturesList);
+                if (registerSerializationMethod == null) {
+                    registerSerializationMethod = createRegisterSerializationForClassMethod(file);
                 }
-                serializationSupport = tc.invokeStaticMethod(
-                        IMAGE_SINGLETONS_LOOKUP,
-                        tc.loadClass("com.oracle.svm.core.jdk.serialize.SerializationRegistry"));
 
-                reflectionFactory = tc.invokeStaticMethod(
-                        ofMethod("sun.reflect.ReflectionFactory", "getReflectionFactory", "sun.reflect.ReflectionFactory"));
-
-                AssignableResultHandle newSerializationConstructor = tc.createVariable(Constructor.class);
-
-                ResultHandle clazzModifiers = tc.invokeVirtualMethod(ofMethod(Class.class, "getModifiers", int.class), clazz);
-                BranchResult isAbstract = tc.ifTrue(tc
-                        .invokeStaticMethod(ofMethod(Modifier.class, "isAbstract", boolean.class, int.class), clazzModifiers));
-
-                BytecodeCreator ifIsAbstract = isAbstract.trueBranch();
-                BytecodeCreator ifNotAbstract = isAbstract.falseBranch();
-
-                //abstract classes uses SerializationSupport$StubForAbstractClass for constructor
-                ResultHandle stubConstructor = ifIsAbstract.invokeVirtualMethod(
-                        ofMethod("sun.reflect.ReflectionFactory", "newConstructorForSerialization", Constructor.class,
-                                Class.class),
-                        reflectionFactory,
-                        tc.loadClass("com.oracle.svm.reflect.serialize.SerializationSupport$StubForAbstractClass"));
-                ifIsAbstract.assign(newSerializationConstructor, stubConstructor);
-
-                ResultHandle classConstructor = ifNotAbstract.invokeVirtualMethod(
-                        ofMethod("sun.reflect.ReflectionFactory", "newConstructorForSerialization", Constructor.class,
-                                Class.class),
-                        reflectionFactory, clazz);
-                ifNotAbstract.assign(newSerializationConstructor, classConstructor);
-
-                ResultHandle newSerializationConstructorClass = tc.invokeVirtualMethod(
-                        ofMethod(Constructor.class, "getDeclaringClass", Class.class),
-                        newSerializationConstructor);
-
-                ResultHandle lookuMethod = tc.invokeStaticMethod(
-                        ofMethod("com.oracle.svm.util.ReflectionUtil", "lookupMethod", Method.class, Class.class, String.class,
-                                Class[].class),
-                        tc.loadClass(Constructor.class), tc.load("getConstructorAccessor"),
-                        tc.newArray(Class.class, tc.load(0)));
-
-                ResultHandle accessor = tc.invokeVirtualMethod(
-                        ofMethod(Method.class, "invoke", Object.class, Object.class,
-                                Object[].class),
-                        lookuMethod, newSerializationConstructor, tc.newArray(Object.class, tc.load(0)));
-
-                tc.invokeVirtualMethod(
-                        ofMethod("com.oracle.svm.reflect.serialize.SerializationSupport", "addConstructorAccessor",
-                                Object.class, Class.class, Class.class, Object.class),
-                        serializationSupport, clazz, newSerializationConstructorClass, accessor);
-                tc.invokeStaticMethod(
-                        ofMethod("com.oracle.svm.reflect.serialize.hosted.SerializationFeature", "addReflections", void.class,
-                                Class.class, Class.class),
-                        clazz, objectClass);
+                tc.invokeStaticMethod(registerSerializationMethod, clazz);
             }
 
             CatchBlockCreator cc = tc.addCatch(Throwable.class);
@@ -500,6 +425,126 @@ public class NativeImageAutoFeatureStep {
         beforeAn.returnValue(null);
 
         file.close();
+    }
+
+    private MethodDescriptor createRegisterSerializationForClassMethod(ClassCreator file) {
+        //register serialization feature as requested
+        MethodCreator requiredFeatures = file.getMethodCreator("getRequiredFeatures", "java.util.List");
+        TryBlock requiredCatch = requiredFeatures.tryBlock();
+
+        ResultHandle serializationFeatureClass = requiredCatch
+                .loadClass("com.oracle.svm.reflect.serialize.hosted.SerializationFeature");
+        ResultHandle requiredFeaturesList = requiredCatch.invokeStaticMethod(
+                ofMethod("java.util.Collections", "singletonList", List.class, Object.class),
+                serializationFeatureClass);
+
+        requiredCatch.returnValue(requiredFeaturesList);
+
+        //method to register class for registration
+        MethodCreator addSerializationForClass = file.getMethodCreator("registerSerializationForClass", "V", Class.class);
+        addSerializationForClass.setModifiers(Modifier.PRIVATE | Modifier.STATIC);
+        ResultHandle clazz = addSerializationForClass.getMethodParam(0);
+
+        TryBlock tc = addSerializationForClass.tryBlock();
+
+        ResultHandle currentThread = tc
+                .invokeStaticMethod(ofMethod(Thread.class, "currentThread", Thread.class));
+        ResultHandle tccl = tc.invokeVirtualMethod(
+                ofMethod(Thread.class, "getContextClassLoader", ClassLoader.class),
+                currentThread);
+
+        ResultHandle objectClass = tc.invokeStaticMethod(
+                ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+                tc.load("java.lang.Object"), tc.load(false), tccl);
+
+        ResultHandle serializationSupport = tc.invokeStaticMethod(
+                IMAGE_SINGLETONS_LOOKUP,
+                tc.loadClass("com.oracle.svm.core.jdk.serialize.SerializationRegistry"));
+
+        ResultHandle reflectionFactory = tc.invokeStaticMethod(
+                ofMethod("sun.reflect.ReflectionFactory", "getReflectionFactory", "sun.reflect.ReflectionFactory"));
+
+        AssignableResultHandle newSerializationConstructor = tc.createVariable(Constructor.class);
+
+        //////////////////////////////////// externalizable ////////////////////////////////////
+
+
+        //////////////////////////////////// externalizable ////////////////////////////////////
+
+//        ResultHandle externalizableClass = tc.invokeStaticMethod(
+//                ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+//                tc.load("java.io.Externalizable"), tc.load(false), tccl);
+//
+//        BranchResult isExternalizable = tc
+//                .ifTrue(tc.invokeVirtualMethod(ofMethod(Class.class, "isAssignable", Class.class), externalizableClass, clazz));
+//        BytecodeCreator ifIsExternalizable = isExternalizable.trueBranch();
+//
+//        ResultHandle externalizableLookupMethod = tc.invokeStaticMethod(
+//                ofMethod("com.oracle.svm.util.ReflectionUtil", "lookupMethod", Method.class, Class.class, String.class,
+//                        Class[].class),
+//                tc.loadClass(Constructor.class), tc.load("getExternalizableConstructor"),
+//                tc.newArray(Class.class, tc.load(0)));
+//
+//        ResultHandle accessor = tc.invokeVirtualMethod(
+//                ofMethod(Method.class, "invoke", Object.class, Object.class,
+//                        Object[].class),
+//                externalizableLookupMethod, newSerializationConstructor,
+//                tc.newArray(Object.class, tc.load(0)));
+//
+//        ifIsExternalizable.returnValue(null);
+
+        ResultHandle clazzModifiers = tc
+                .invokeVirtualMethod(ofMethod(Class.class, "getModifiers", int.class), clazz);
+        BranchResult isAbstract = tc.ifTrue(tc
+                .invokeStaticMethod(ofMethod(Modifier.class, "isAbstract", boolean.class, int.class), clazzModifiers));
+
+        BytecodeCreator ifIsAbstract = isAbstract.trueBranch();
+        BytecodeCreator ifNotAbstract = isAbstract.falseBranch();
+
+        //abstract classes uses SerializationSupport$StubForAbstractClass for constructor
+        ResultHandle stubConstructor = ifIsAbstract.invokeVirtualMethod(
+                ofMethod("sun.reflect.ReflectionFactory", "newConstructorForSerialization", Constructor.class,
+                        Class.class),
+                reflectionFactory,
+                tc
+                        .loadClass("com.oracle.svm.reflect.serialize.SerializationSupport$StubForAbstractClass"));
+        ifIsAbstract.assign(newSerializationConstructor, stubConstructor);
+
+        ResultHandle classConstructor = ifNotAbstract.invokeVirtualMethod(
+                ofMethod("sun.reflect.ReflectionFactory", "newConstructorForSerialization", Constructor.class,
+                        Class.class),
+                reflectionFactory, clazz);
+        ifNotAbstract.assign(newSerializationConstructor, classConstructor);
+
+        ResultHandle newSerializationConstructorClass = tc.invokeVirtualMethod(
+                ofMethod(Constructor.class, "getDeclaringClass", Class.class),
+                newSerializationConstructor);
+
+        ResultHandle lookupMethod = tc.invokeStaticMethod(
+                ofMethod("com.oracle.svm.util.ReflectionUtil", "lookupMethod", Method.class, Class.class, String.class,
+                        Class[].class),
+                tc.loadClass(Constructor.class), tc.load("getConstructorAccessor"),
+                tc.newArray(Class.class, tc.load(0)));
+
+        ResultHandle accessor = tc.invokeVirtualMethod(
+                ofMethod(Method.class, "invoke", Object.class, Object.class,
+                        Object[].class),
+                lookupMethod, newSerializationConstructor,
+                tc.newArray(Object.class, tc.load(0)));
+
+        tc.invokeVirtualMethod(
+                ofMethod("com.oracle.svm.reflect.serialize.SerializationSupport", "addConstructorAccessor",
+                        Object.class, Class.class, Class.class, Object.class),
+                serializationSupport, clazz, newSerializationConstructorClass, accessor);
+        tc.invokeStaticMethod(
+                ofMethod("com.oracle.svm.reflect.serialize.hosted.SerializationFeature", "addReflections", void.class,
+                        Class.class, Class.class),
+                clazz, objectClass);
+
+        addSerializationForClass.returnValue(null);
+
+        return addSerializationForClass.getMethodDescriptor();
+
     }
 
     public void addReflectiveMethod(Map<String, ReflectionInfo> reflectiveClasses, ReflectiveMethodBuildItem methodInfo) {
