@@ -12,12 +12,7 @@ public class ExternalizablePerson implements Externalizable {
 
     private String name;
 
-    public static ExternalizablePerson create(String name) {
-        return new ExternalizablePerson(name);
-    }
-
-    private ExternalizablePerson(String name) {
-        setName(name);
+    public ExternalizablePerson() {
     }
 
     public String getName() {
@@ -31,11 +26,13 @@ public class ExternalizablePerson implements Externalizable {
     @Override
     public void writeExternal(ObjectOutput out) throws IOException {
         out.writeUTF(name);
+        System.out.println(">>>>>>>>>>>>>>>>>>.... write");
     }
 
     @Override
     public void readExternal(ObjectInput in)
             throws IOException, ClassNotFoundException {
         this.name = in.readUTF();
+        System.out.println(">>>>>>>>>>>>>>>>>>.... read");
     }
 }

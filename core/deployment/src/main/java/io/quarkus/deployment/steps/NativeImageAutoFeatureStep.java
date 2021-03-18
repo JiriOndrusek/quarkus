@@ -2,6 +2,7 @@ package io.quarkus.deployment.steps;
 
 import static io.quarkus.gizmo.MethodDescriptor.ofMethod;
 
+import java.io.ObjectStreamClass;
 import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -359,7 +360,7 @@ public class NativeImageAutoFeatureStep {
             }
 
             CatchBlockCreator cc = tc.addCatch(Throwable.class);
-            //cc.invokeVirtualMethod(ofMethod(Throwable.class, "printStackTrace", void.class), cc.getCaughtException());
+            cc.invokeVirtualMethod(ofMethod(Throwable.class, "printStackTrace", void.class), cc.getCaughtException());
             mv.returnValue(null);
         }
 
@@ -466,32 +467,43 @@ public class NativeImageAutoFeatureStep {
 
         AssignableResultHandle newSerializationConstructor = tc.createVariable(Constructor.class);
 
-        //////////////////////////////////// externalizable ////////////////////////////////////
+        ResultHandle externalizableClass = tc.invokeStaticMethod(
+                ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+                tc.load("java.io.Externalizable"), tc.load(false), tccl);
 
+        BranchResult isExternalizable = tc
+                .ifTrue(tc.invokeVirtualMethod(ofMethod(Class.class, "isAssignableFrom", boolean.class, Class.class),
+                        externalizableClass, clazz));
+        BytecodeCreator ifIsExternalizable = isExternalizable.trueBranch();
 
-        //////////////////////////////////// externalizable ////////////////////////////////////
+        ResultHandle array = ifIsExternalizable.newArray(Class.class, tc.load(1));
+        ResultHandle classClass = ifIsExternalizable.invokeStaticMethod(
+                ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
+                ifIsExternalizable.load("java.lang.Class"), ifIsExternalizable.load(false), tccl);
+        ifIsExternalizable.writeArrayValue(array, 0, classClass);
 
-//        ResultHandle externalizableClass = tc.invokeStaticMethod(
-//                ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
-//                tc.load("java.io.Externalizable"), tc.load(false), tccl);
-//
-//        BranchResult isExternalizable = tc
-//                .ifTrue(tc.invokeVirtualMethod(ofMethod(Class.class, "isAssignable", Class.class), externalizableClass, clazz));
-//        BytecodeCreator ifIsExternalizable = isExternalizable.trueBranch();
-//
-//        ResultHandle externalizableLookupMethod = tc.invokeStaticMethod(
-//                ofMethod("com.oracle.svm.util.ReflectionUtil", "lookupMethod", Method.class, Class.class, String.class,
-//                        Class[].class),
-//                tc.loadClass(Constructor.class), tc.load("getExternalizableConstructor"),
-//                tc.newArray(Class.class, tc.load(0)));
-//
-//        ResultHandle accessor = tc.invokeVirtualMethod(
-//                ofMethod(Method.class, "invoke", Object.class, Object.class,
-//                        Object[].class),
-//                externalizableLookupMethod, newSerializationConstructor,
-//                tc.newArray(Object.class, tc.load(0)));
-//
-//        ifIsExternalizable.returnValue(null);
+        ResultHandle externalizableLookupMethod = ifIsExternalizable.invokeStaticMethod(
+                ofMethod("com.oracle.svm.util.ReflectionUtil", "lookupMethod", Method.class, Class.class, String.class,
+                        Class[].class),
+                ifIsExternalizable.loadClass(ObjectStreamClass.class), ifIsExternalizable.load("getExternalizableConstructor"),
+                array);
+
+        ResultHandle externalizableConstructor = ifIsExternalizable.invokeVirtualMethod(
+                ofMethod(Method.class, "invoke", Object.class, Object.class,
+                        Object[].class),
+                externalizableLookupMethod, ifIsExternalizable.loadNull(), clazz);
+
+        ResultHandle externalizableConstructorClass = ifIsExternalizable.invokeVirtualMethod(
+                ofMethod(Constructor.class, "getDeclaringClass", Class.class),
+                externalizableConstructor);
+
+        ifIsExternalizable.invokeStaticMethod(
+                ofMethod("com.oracle.svm.reflect.serialize.hosted.SerializationFeature", "addReflections", void.class,
+                        Class.class, Class.class),
+                clazz, externalizableConstructorClass);
+
+        ifIsExternalizable.returnValue(null);
+
 
         ResultHandle clazzModifiers = tc
                 .invokeVirtualMethod(ofMethod(Class.class, "getModifiers", int.class), clazz);
@@ -618,7 +630,4 @@ public class NativeImageAutoFeatureStep {
         }
     }
 
-    public static void main(String[] args) {
-        Modifier.isAbstract(Number.class.getModifiers());
-    }
 }

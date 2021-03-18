@@ -15,6 +15,7 @@ import javax.servlet.http.HttpServletResponse;
 import io.quarkus.it.corestuff.serialization.ExternalizablePerson;
 import io.quarkus.it.corestuff.serialization.Person;
 import io.quarkus.it.corestuff.serialization.SomeSerializationObject;
+import org.bouncycastle.jce.exception.ExtCertPathValidatorException;
 
 /**
  * Some core reflection functionality tests
@@ -31,7 +32,9 @@ public class SerializationTestEndpoint extends HttpServlet {
         try {
             SomeSerializationObject instance = new SomeSerializationObject();
             instance.setPerson(new Person("Sheldon"));
-            instance.setExternalizablePerson(ExternalizablePerson.create("Sheldon 2.0"));
+            ExternalizablePerson ep = new ExternalizablePerson();
+            ep.setName("Sheldon 2.0");
+            instance.setExternalizablePerson(ep);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             ObjectOutputStream os = new ObjectOutputStream(out);
             os.writeObject(instance);
