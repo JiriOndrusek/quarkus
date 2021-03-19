@@ -15,7 +15,6 @@ import javax.servlet.http.HttpServletResponse;
 import io.quarkus.it.corestuff.serialization.ExternalizablePerson;
 import io.quarkus.it.corestuff.serialization.Person;
 import io.quarkus.it.corestuff.serialization.SomeSerializationObject;
-import org.bouncycastle.jce.exception.ExtCertPathValidatorException;
 
 /**
  * Some core reflection functionality tests

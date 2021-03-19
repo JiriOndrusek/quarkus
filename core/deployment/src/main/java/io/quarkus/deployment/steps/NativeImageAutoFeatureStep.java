@@ -360,7 +360,7 @@ public class NativeImageAutoFeatureStep {
             }
 
             CatchBlockCreator cc = tc.addCatch(Throwable.class);
-            cc.invokeVirtualMethod(ofMethod(Throwable.class, "printStackTrace", void.class), cc.getCaughtException());
+            //cc.invokeVirtualMethod(ofMethod(Throwable.class, "printStackTrace", void.class), cc.getCaughtException());
             mv.returnValue(null);
         }
 
@@ -476,22 +476,25 @@ public class NativeImageAutoFeatureStep {
                         externalizableClass, clazz));
         BytecodeCreator ifIsExternalizable = isExternalizable.trueBranch();
 
-        ResultHandle array = ifIsExternalizable.newArray(Class.class, tc.load(1));
+        ResultHandle array1 = ifIsExternalizable.newArray(Class.class, tc.load(1));
         ResultHandle classClass = ifIsExternalizable.invokeStaticMethod(
                 ofMethod(Class.class, "forName", Class.class, String.class, boolean.class, ClassLoader.class),
                 ifIsExternalizable.load("java.lang.Class"), ifIsExternalizable.load(false), tccl);
-        ifIsExternalizable.writeArrayValue(array, 0, classClass);
+        ifIsExternalizable.writeArrayValue(array1, 0, classClass);
 
         ResultHandle externalizableLookupMethod = ifIsExternalizable.invokeStaticMethod(
                 ofMethod("com.oracle.svm.util.ReflectionUtil", "lookupMethod", Method.class, Class.class, String.class,
                         Class[].class),
                 ifIsExternalizable.loadClass(ObjectStreamClass.class), ifIsExternalizable.load("getExternalizableConstructor"),
-                array);
+                array1);
+
+        ResultHandle array2 = ifIsExternalizable.newArray(Object.class, tc.load(1));
+        ifIsExternalizable.writeArrayValue(array2, 0, clazz);
 
         ResultHandle externalizableConstructor = ifIsExternalizable.invokeVirtualMethod(
                 ofMethod(Method.class, "invoke", Object.class, Object.class,
                         Object[].class),
-                externalizableLookupMethod, ifIsExternalizable.loadNull(), clazz);
+                externalizableLookupMethod, ifIsExternalizable.loadNull(), array2);
 
         ResultHandle externalizableConstructorClass = ifIsExternalizable.invokeVirtualMethod(
                 ofMethod(Constructor.class, "getDeclaringClass", Class.class),
@@ -503,7 +506,6 @@ public class NativeImageAutoFeatureStep {
                 clazz, externalizableConstructorClass);
 
         ifIsExternalizable.returnValue(null);
-
 
         ResultHandle clazzModifiers = tc
                 .invokeVirtualMethod(ofMethod(Class.class, "getModifiers", int.class), clazz);
