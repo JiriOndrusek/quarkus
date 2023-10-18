@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -30,9 +29,31 @@ class QuarkusUpdatesRepositoryTest {
         recipeDirectoryNames.put("core", new String[] { "2.7", "3.1" });
         recipeDirectoryNames.put("org.apache.camel.quarkus:camel-quarkus-core", new String[] { "2.7", "3.0" });
         ClassPathResourceLoader resourceLoader = new ClassPathResourceLoader();
-        List<String[]> recipes = fetchRecipesAsList(resourceLoader, "dir/quarkus-update", recipeDirectoryNames);
+        Map<String, String> recipes = fetchRecipesAsList(resourceLoader, "dir/quarkus-update", recipeDirectoryNames);
         int noOfRecipes = recipes.size();
         assertEquals(3, noOfRecipes);
+    }
 
+    @Test
+    void testShouldLoadRecipesFromTheDirectoryForTransitive() throws IOException {
+        Map<String, String[]> recipeDirectoryNames = new LinkedHashMap<>();
+        recipeDirectoryNames.put("core", new String[] { "2.7", "3.1" });
+        recipeDirectoryNames.put("org.apache.camel.quarkus:camel-quarkus-file", new String[] { "2.7", "3.0" });
+        ClassPathResourceLoader resourceLoader = new ClassPathResourceLoader();
+        Map<String, String> recipes = fetchRecipesAsList(resourceLoader, "dir/quarkus-update", recipeDirectoryNames);
+        int noOfRecipes = recipes.size();
+        assertEquals(3, noOfRecipes);
+    }
+
+    @Test
+    void testShouldLoadRecipesFromTheDirectoryFor2Transitive() throws IOException {
+        Map<String, String[]> recipeDirectoryNames = new LinkedHashMap<>();
+        recipeDirectoryNames.put("core", new String[] { "2.7", "3.1" });
+        recipeDirectoryNames.put("org.apache.camel.quarkus:camel-quarkus-file", new String[] { "2.7", "3.1" });
+        recipeDirectoryNames.put("org.apache.camel.quarkus:camel-quarkus-ftp", new String[] { "2.7", "3.1" });
+        ClassPathResourceLoader resourceLoader = new ClassPathResourceLoader();
+        Map<String, String> recipes = fetchRecipesAsList(resourceLoader, "dir/quarkus-update", recipeDirectoryNames);
+        int noOfRecipes = recipes.size();
+        assertEquals(3, noOfRecipes);
     }
 }
